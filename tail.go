@@ -15,14 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hpcloud/tail/ratelimiter"
-	"github.com/hpcloud/tail/util"
-	"github.com/hpcloud/tail/watch"
+	"github.com/chennqqi/tail/ratelimiter"
+	"github.com/chennqqi/tail/util"
+	"github.com/chennqqi/tail/watch"
 	"gopkg.in/tomb.v1"
 )
 
 var (
-	ErrStop = errors.New("tail should now stop")
+	ErrStop     = errors.New("tail should now stop")
+	ErrUserStop = errors.New("tail stoped by user")
 )
 
 type Line struct {
@@ -74,8 +75,9 @@ type Config struct {
 }
 
 type Tail struct {
-	Filename string
-	Lines    chan *Line
+	Filename     string
+	Lines        chan *Line
+	externalChan bool
 	Config
 
 	file   *os.File
@@ -109,6 +111,51 @@ func TailFile(filename string, config Config) (*Tail, error) {
 		Filename: filename,
 		Lines:    make(chan *Line),
 		Config:   config,
+	}
+
+	// when Logger was not specified in config, use default logger
+	if t.Logger == nil {
+		t.Logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
+	if t.Poll {
+		t.watcher = watch.NewPollingFileWatcher(filename)
+	} else {
+		t.watcher = watch.NewInotifyFileWatcher(filename)
+	}
+
+	if t.MustExist {
+		var err error
+		t.file, err = OpenFile(t.Filename)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	go t.tailFileSync()
+
+	return t, nil
+}
+
+// TailFile begins tailing the file. Output stream is made available
+// via the `Tail.Lines` channel. To handle errors during tailing,
+// invoke the `Wait` or `Err` method after finishing reading from the
+// `Lines` channel.
+func TailFileEx(filename string, config Config, extChan chan *Line) (*Tail, error) {
+	if config.ReOpen && !config.Follow {
+		util.Fatal("cannot set ReOpen without Follow.")
+	}
+
+	t := &Tail{
+		Filename: filename,
+		Config:   config,
+	}
+	t.Lines = extChan
+	t.externalChan = true
+
+	err := t.Wait()
+	if err != nil {
+		fmt.Println(err)
 	}
 
 	// when Logger was not specified in config, use default logger
@@ -173,7 +220,9 @@ func (tail *Tail) StopAtEOF() error {
 var errStopAtEOF = errors.New("tail: stop at eof")
 
 func (tail *Tail) close() {
-	close(tail.Lines)
+	if !tail.externalChan {
+		close(tail.Lines)
+	}
 	tail.closeFile()
 }
 
