@@ -26,6 +26,8 @@ var (
 	ErrUserStop = errors.New("tail stoped by user")
 )
 
+type CustomReadLine func(*bufio.Reader) (string, error)
+
 type Line struct {
 	Text string
 	Time time.Time
@@ -71,7 +73,8 @@ type Config struct {
 
 	// Logger, when nil, is set to tail.DefaultLogger
 	// To disable logging: set field to tail.DiscardingLogger
-	Logger logger
+	Logger       logger
+	ReadlineFunc CustomReadLine
 }
 
 type Tail struct {
@@ -131,16 +134,20 @@ func TailFile(filename string, config Config) (*Tail, error) {
 			return nil, err
 		}
 	}
+	if t.ReadlineFunc == nil {
+		t.ReadlineFunc = defaultReadline
+	}
 
 	go t.tailFileSync()
 
 	return t, nil
 }
 
-// TailFile begins tailing the file. Output stream is made available
+// TailFileEx begins tailing the file. Output stream is made available
 // via the `Tail.Lines` channel. To handle errors during tailing,
 // invoke the `Wait` or `Err` method after finishing reading from the
 // `Lines` channel.
+// TODO: use extenal channel
 func TailFileEx(filename string, config Config, extChan chan *Line) (*Tail, error) {
 	if config.ReOpen && !config.Follow {
 		util.Fatal("cannot set ReOpen without Follow.")
@@ -258,8 +265,13 @@ func (tail *Tail) reopen() error {
 
 func (tail *Tail) readLine() (string, error) {
 	tail.lk.Lock()
-	line, err := tail.reader.ReadString('\n')
+	line, err := tail.ReadlineFunc(tail.reader)
 	tail.lk.Unlock()
+	return line, err
+}
+
+func defaultReadline(r *bufio.Reader) (string, error) {
+	line, err := r.ReadString('\n')
 	if err != nil {
 		// Note ReadString "returns the data read before the error" in
 		// case of an error, including EOF, so we return it as is. The
@@ -268,7 +280,6 @@ func (tail *Tail) readLine() (string, error) {
 	}
 
 	line = strings.TrimRight(line, "\n")
-
 	return line, err
 }
 
