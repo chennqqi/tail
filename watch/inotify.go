@@ -10,7 +10,7 @@ import (
 
 	"github.com/chennqqi/tail/util"
 
-	"gopkg.in/fsnotify.v1"
+	"gopkg.in/fsnotify/fsnotify.v1"
 	"gopkg.in/tomb.v1"
 )
 
