@@ -493,5 +493,7 @@ func (tail *Tail) sendLine(line string) bool {
 // meant to be invoked from a process's exit handler. Linux kernel may not
 // automatically remove inotify watches after the process exits.
 func (tail *Tail) Cleanup() {
-	watch.Cleanup(tail.Filename)
+	if !tail.Poll {
+		watch.Cleanup(tail.Filename)
+	}
 }
